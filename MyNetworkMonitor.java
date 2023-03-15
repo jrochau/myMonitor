@@ -1,20 +1,25 @@
 package JavaHIDP;
 
-import javax.swing.*;
 import java.awt.*;
+import javax.swing.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
+import javax.swing.SwingWorker;
 import com.sun.management.OperatingSystemMXBean;
 
 public class MyNetworkMonitor extends JFrame {
-    private final JLabel cpuLabel;
-    private final JLabel memLabel;
+    private JLabel cpuLabel;
+    private JLabel memLabel;
 
     public MyNetworkMonitor() {
         super("My Monitor");
 
         JPanel mainPanel = new JPanel();
-        mainPanel.setLayout(new GridLayout(2, 1));
+        mainPanel.setLayout(new GridLayout(1, 3));
 
+        // CPU and memory labels
         cpuLabel = new JLabel("CPU usage: N/A");
         cpuLabel.setHorizontalAlignment(JLabel.CENTER);
 
@@ -24,17 +29,21 @@ public class MyNetworkMonitor extends JFrame {
         mainPanel.add(cpuLabel);
         mainPanel.add(memLabel);
 
+        // Network statistics
+        JTextArea networkStatsArea = new JTextArea();
+        networkStatsArea.setEditable(false);
+        JScrollPane networkStatsScrollPane = new JScrollPane(networkStatsArea);
+
+        mainPanel.add(networkStatsScrollPane);
+
         add(mainPanel);
 
-        setSize(300, 100);
+        setSize(900, 300);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setVisible(true);
 
         startMonitoring();
-    }
-
-    public static void main(String[] args) {
-        new MyNetworkMonitor();
+        updateNetworkStatistics(networkStatsArea);
     }
 
     private void startMonitoring() {
@@ -72,5 +81,48 @@ public class MyNetworkMonitor extends JFrame {
         double usedMemory = osBean.getTotalPhysicalMemorySize() - osBean.getFreePhysicalMemorySize();
         double maxMemory = osBean.getTotalPhysicalMemorySize();
         return usedMemory / maxMemory * 100.0;
+    }
+
+    private void updateNetworkStatistics(JTextArea textArea) {
+        Timer timer = new Timer(1000, e -> {
+            try {
+                String networkStats = getNetworkStats();
+                textArea.setText(networkStats);
+            } catch (IOException ex) {
+                textArea.append("Error: " + ex.getMessage() + "\n");
+            }
+        });
+
+        timer.start();
+    }
+
+    private static String getNetworkStats() throws IOException {
+    StringBuilder output = new StringBuilder();
+    String command = "netstat -s";
+
+    Process process = Runtime.getRuntime().exec(command);
+    BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+
+    String line;
+    boolean readingIPv4Stats = false;
+    while ((line = reader.readLine()) != null) {
+        if (line.trim().startsWith("IPv4")) {
+            readingIPv4Stats = true;
+            output.append(line).append("\n");
+        } else if (line.trim().startsWith("IPv6")) {
+            readingIPv4Stats = false;
+        } else if (readingIPv4Stats) {
+            output.append(line).append("\n");
+        }
+    }
+
+    return output.toString();
+}
+
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            new MyNetworkMonitor();
+        });
     }
 }
