@@ -53,7 +53,7 @@ public class MyMonitor extends JFrame {
 
         add(mainPanel);
     
-        // Set window size
+        // Set window size based on inches
         int dpi = Toolkit.getDefaultToolkit().getScreenResolution();
         int width = (int) (3.5 * dpi);
         int height = (int) (5 * dpi);
@@ -66,7 +66,6 @@ public class MyMonitor extends JFrame {
         updateNetworkStatistics(networkStatsArea);
         updateProcesses(processesTableModel);
     }
-
     private void updateProcesses(DefaultTableModel processesTableModel) {
         Timer timer = new Timer(1000, e -> {
             processesTableModel.setRowCount(0); // Clear the table
@@ -76,34 +75,59 @@ public class MyMonitor extends JFrame {
                     String[] rowData = new String[4];
                     rowData[0] = Long.toString(processHandle.pid());
                     rowData[1] = processInfo.command().orElse("Unknown");
-                    rowData[2] = "N/A"; // CPU usage is not available using ProcessHandle
+                    rowData[2] = getProcessCpuUsage(processHandle).map(val -> String.format("%.2f", val * 100) + "%").orElse("N/A");
                     rowData[3] = processInfo.totalCpuDuration().isPresent() ? processInfo.totalCpuDuration().get().toString() : "N/A";
                     processesTableModel.addRow(rowData);
                 }
             });
         });
-
+    
         timer.start();
+    }
+
+    private Optional<Double> getProcessCpuUsage(ProcessHandle processHandle) {
+        Optional<Double> cpuUsage = Optional.empty();
+        ThreadMXBean threadMXBean = ManagementFactory.getThreadMXBean();
+        long[] ids = threadMXBean.getAllThreadIds();
+        for (long id : ids) {
+            ThreadInfo threadInfo = threadMXBean.getThreadInfo(id, Integer.MAX_VALUE);
+            if (threadInfo != null && threadInfo.getThreadId() == processHandle.pid()) {
+                long cpuTime = threadMXBean.getThreadCpuTime(id);
+                long upTime = ManagementFactory.getRuntimeMXBean().getUptime() * 1000000;
+                double cpuUsagePercentage = ((double) cpuTime / upTime) * 100.0;
+                cpuUsage = Optional.of(cpuUsagePercentage);
+                break;
+            }
+        }
+        return cpuUsage;
     }
 
     private void startMonitoring() {
         SwingWorker<Void, Double[]> worker = new SwingWorker<>() {
             OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+            private final double MEMORY_THRESHOLD = 80; // Set the memory threshold to 80%
+            private boolean alertShown = false; // Flag to indicate if an alert has already been shown
 
-            @Override
-            protected Void doInBackground() {
-                while (!isCancelled()) {
-                    double cpuUsage = osBean.getSystemCpuLoad() * 100;
-                    double memUsage = getMemoryUsage();
-                    publish(new Double[]{cpuUsage, memUsage});
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException e) {
-                        break;
-                    }
+        @Override
+        protected Void doInBackground() {
+            while (!isCancelled()) {
+                double cpuUsage = osBean.getSystemCpuLoad() * 100;
+                double memUsage = getMemoryUsage();
+                publish(new Double[]{cpuUsage, memUsage});
+                if (memUsage >= MEMORY_THRESHOLD && !alertShown) { // Trigger alert if memory usage exceeds threshold
+                    JOptionPane.showMessageDialog(MyMonitor.this, "High memory usage detected!", "Alert", JOptionPane.WARNING_MESSAGE);
+                    alertShown = true;
+                } else if (memUsage < MEMORY_THRESHOLD) {
+                    alertShown = false;
                 }
-                return null;
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    break;
+                }
             }
+            return null;
+        }
 
             @Override
             protected void process(java.util.List<Double[]> chunks) {
@@ -153,12 +177,12 @@ public class MyMonitor extends JFrame {
             } else if (line.trim().startsWith("IPv6")) {
                 readingIPv4Stats = false;
             } else if (readingIPv4Stats) {
-                if (!line.contains("Reassembly Required") && !line.contains("Reassembly Successful")&& !line.contains("Reassembly Failures")&& !line.contains("Fragments Created")&& !line.contains("Datagrams Failing Fragmentation")) {
+                if (!line.contains("Reassembly Required") && !line.contains("Reassembly Successful") && !line.contains("Reassembly Failures") && !line.contains("Fragments Created") && !line.contains("Datagrams Failing Fragmentation")) {
                     output.append(line).append("\n");
                 }
             }
         }
-    
+
         return output.toString();
     }
 
