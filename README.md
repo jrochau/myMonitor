@@ -1,6 +1,6 @@
 # myMonitor
 Systems Tool
 
-So far I have it to monitor the CPU speed and Memory usage and display it in a GUI
+Updated app to represent data better visually. Process monitory section added with PID and memory usage. 
 
-I have some network traffic displaying My next goal is to see if I cant incorporate a graph to display this data in python. 
+Want to integrate a separate program in C to better handle the PID and CPU usage
