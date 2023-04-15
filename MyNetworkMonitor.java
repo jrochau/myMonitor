@@ -1,49 +1,89 @@
-package JavaHIDP;
-
 import java.awt.*;
 import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
-import javax.swing.SwingWorker;
+import java.lang.management.ThreadMXBean;
+import java.util.Optional;
+import java.lang.management.ThreadInfo;
+
 import com.sun.management.OperatingSystemMXBean;
 
-public class MyNetworkMonitor extends JFrame {
+public class MyMonitor extends JFrame {
     private JLabel cpuLabel;
     private JLabel memLabel;
 
-    public MyNetworkMonitor() {
+    public MyMonitor() {
         super("My Monitor");
-
+    
         JPanel mainPanel = new JPanel();
-        mainPanel.setLayout(new GridLayout(1, 3));
-
+        mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
+    
         // CPU and memory labels
+        JPanel resourcePanel = new JPanel();
+        resourcePanel.setLayout(new GridLayout(2, 1));
         cpuLabel = new JLabel("CPU usage: N/A");
         cpuLabel.setHorizontalAlignment(JLabel.CENTER);
-
+    
         memLabel = new JLabel("Memory usage: N/A");
         memLabel.setHorizontalAlignment(JLabel.CENTER);
-
-        mainPanel.add(cpuLabel);
-        mainPanel.add(memLabel);
-
+    
+        resourcePanel.add(cpuLabel);
+        resourcePanel.add(memLabel);
+        mainPanel.add(resourcePanel);
+    
+        // Process monitoring
+        DefaultTableModel processesTableModel = new DefaultTableModel(new String[]{"PID", "Name", "CPU Usage", "Memory Usage"}, 0);
+        JTable processesTable = new JTable(processesTableModel);
+        JScrollPane processesScrollPane = new JScrollPane(processesTable);
+        processesScrollPane.setPreferredSize(new Dimension(300, 100));
+        mainPanel.add(processesScrollPane);
+    
         // Network statistics
         JTextArea networkStatsArea = new JTextArea();
         networkStatsArea.setEditable(false);
-        JScrollPane networkStatsScrollPane = new JScrollPane(networkStatsArea);
-
-        mainPanel.add(networkStatsScrollPane);
+        networkStatsArea.setRows(10);
+        networkStatsArea.setColumns(30);
+        networkStatsArea.setLineWrap(true);
+        networkStatsArea.setWrapStyleWord(true);
+    
+        mainPanel.add(networkStatsArea);
 
         add(mainPanel);
-
-        setSize(900, 300);
+    
+        // Set window size
+        int dpi = Toolkit.getDefaultToolkit().getScreenResolution();
+        int width = (int) (3.5 * dpi);
+        int height = (int) (5 * dpi);
+        setSize(width, height);
+    
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setVisible(true);
-
+    
         startMonitoring();
         updateNetworkStatistics(networkStatsArea);
+        updateProcesses(processesTableModel);
+    }
+
+    private void updateProcesses(DefaultTableModel processesTableModel) {
+        Timer timer = new Timer(1000, e -> {
+            processesTableModel.setRowCount(0); // Clear the table
+            ProcessHandle.allProcesses().forEach(processHandle -> {
+                ProcessHandle.Info processInfo = processHandle.info();
+                if (processInfo.command().isPresent()) {
+                    String[] rowData = new String[4];
+                    rowData[0] = Long.toString(processHandle.pid());
+                    rowData[1] = processInfo.command().orElse("Unknown");
+                    rowData[2] = "N/A"; // CPU usage is not available using ProcessHandle
+                    rowData[3] = processInfo.totalCpuDuration().isPresent() ? processInfo.totalCpuDuration().get().toString() : "N/A";
+                    processesTableModel.addRow(rowData);
+                }
+            });
+        });
+
+        timer.start();
     }
 
     private void startMonitoring() {
@@ -52,16 +92,17 @@ public class MyNetworkMonitor extends JFrame {
 
             @Override
             protected Void doInBackground() {
-                while (true) {
+                while (!isCancelled()) {
                     double cpuUsage = osBean.getSystemCpuLoad() * 100;
                     double memUsage = getMemoryUsage();
                     publish(new Double[]{cpuUsage, memUsage});
                     try {
                         Thread.sleep(1000);
                     } catch (InterruptedException e) {
-                        e.printStackTrace();
+                        break;
                     }
                 }
+                return null;
             }
 
             @Override
@@ -83,46 +124,47 @@ public class MyNetworkMonitor extends JFrame {
         return usedMemory / maxMemory * 100.0;
     }
 
-    private void updateNetworkStatistics(JTextArea textArea) {
+    private void updateNetworkStatistics(JTextArea networkStatsArea) {
         Timer timer = new Timer(1000, e -> {
             try {
                 String networkStats = getNetworkStats();
-                textArea.setText(networkStats);
+                networkStatsArea.setText(networkStats);
             } catch (IOException ex) {
-                textArea.append("Error: " + ex.getMessage() + "\n");
+                networkStatsArea.append("Error: " + ex.getMessage() + "\n");
             }
         });
-
+    
         timer.start();
     }
 
     private static String getNetworkStats() throws IOException {
-    StringBuilder output = new StringBuilder();
-    String command = "netstat -s";
-
-    Process process = Runtime.getRuntime().exec(command);
-    BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-
-    String line;
-    boolean readingIPv4Stats = false;
-    while ((line = reader.readLine()) != null) {
-        if (line.trim().startsWith("IPv4")) {
-            readingIPv4Stats = true;
-            output.append(line).append("\n");
-        } else if (line.trim().startsWith("IPv6")) {
-            readingIPv4Stats = false;
-        } else if (readingIPv4Stats) {
-            output.append(line).append("\n");
+        StringBuilder output = new StringBuilder();
+        String command = "netstat -s";
+    
+        Process process = Runtime.getRuntime().exec(command);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+    
+        String line;
+        boolean readingIPv4Stats = false;
+        while ((line = reader.readLine()) != null) {
+            if (line.trim().startsWith("IPv4")) {
+                readingIPv4Stats = true;
+                output.append(line).append("\n");
+            } else if (line.trim().startsWith("IPv6")) {
+                readingIPv4Stats = false;
+            } else if (readingIPv4Stats) {
+                if (!line.contains("Reassembly Required") && !line.contains("Reassembly Successful")&& !line.contains("Reassembly Failures")&& !line.contains("Fragments Created")&& !line.contains("Datagrams Failing Fragmentation")) {
+                    output.append(line).append("\n");
+                }
+            }
         }
+    
+        return output.toString();
     }
-
-    return output.toString();
-}
-
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
-            new MyNetworkMonitor();
+            new MyMonitor();
         });
     }
 }
