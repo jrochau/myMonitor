@@ -1,5 +1,5 @@
 # myMonitor
-Systems Tool
+Systems Tool - This is just to demonstrate Java programing capabilities. This is to mimic a task manager. 
 
 Updated app to represent data better visually. Process monitory section added with PID and memory usage. 
 
